@@ -10,4 +10,4 @@ Mode III: Caliban rotation tracker with fairness metrics
 Mode IV: Longitudinal study across all group sizes n=3 to 15
 
 Associated paper: The Caliban-Partition Model: A Mathematical Framework for Social Exclusion within Small Groups (working paper, 2025). Contact for reuse or citation.
-License: All rights reserved. The code and model are associated with an unpublished working paper. Viewing and sharing the link is welcome; reproduction or adaptation requires permission.
+[![License: CC BY-NC-ND 4.0](https://licensebuttons.net/l/by-nc-nd/4.0/88x31.png)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
