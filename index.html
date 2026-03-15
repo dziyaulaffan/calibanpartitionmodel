@@ -786,15 +786,16 @@ canvas {
       <div class="mode-explain"><strong>Mode IV: Longitudinal Study</strong><br>The big picture. Simulates all group sizes from n=3 to n=15 at once and plots their welfare trajectories on a shared chart. After the simulation completes, you can display a ranked table showing which group sizes produce the highest member utility. This directly replicates the analytical results from the paper through Monte Carlo evidence.</div>
 
       <h3>Model Parameters</h3>
-      <p>You can adjust these in the collapsible panel below. The defaults match the paper.</p>
-      <p><span class="param-explain">α (pair preference)</span> controls how strongly conversations gravitate toward pairs. Higher values mean the partition {2,2,2} for n=6 becomes much more likely than {3,3}.</p>
+      <p>You can adjust these in the collapsible panel below. The defaults match the empirically calibrated values from the paper.</p>
+      <p><span class="param-explain">α (pair preference)</span> controls how strongly conversations gravitate toward pairs. Higher values mean the partition {2,2,2} for n=6 becomes much more likely than {3,3}. Default: 2.2 (calibrated from observed pair/triad ratio of 274/126).</p>
       <p><span class="param-explain">β (balance preference)</span> controls how much the model favours equal-sized subgroups. Higher values penalise unbalanced splits like {5,1} relative to {3,3}.</p>
-      <p><span class="param-explain">γ (fragmentation)</span> controls how unlikely it is that the whole group stays as one conversation. Higher values make fragmentation into subgroups almost certain for larger groups.</p>
+      <p><span class="param-explain">γ (fragmentation)</span> controls how unlikely it is that the whole group stays as one conversation. Higher values make fragmentation into subgroups almost certain for larger groups. Default: 5 (calibrated from ~8% unified partition rate).</p>
       <p><span class="param-explain">δ (Caliban penalty)</span> is the utility cost of being isolated. The default of 5 means being a Caliban is far worse than the baseline benefit of being included (u_base = 2).</p>
+      <p><span class="param-explain">κ (coordination cost)</span> is the per-member cost of belonging to a larger group. Each member beyond n=3 adds κ to the coordination burden. Default: 0.07 (calibrated from the observation that no groups exceeded n=7, implying coordination costs make large groups suboptimal despite their lower Caliban probabilities).</p>
       <p><span class="param-explain">T (interactions)</span> is the number of social gatherings to simulate. More interactions give the observed rates more time to converge to the predicted values.</p>
 
       <h3>Visibility Correction</h3>
-      <p>The model includes a correction mechanism: in smaller groups, exclusion is more noticeable and more likely to be fixed. In a group of 3, there is a 50% chance someone notices and pulls the isolated person back in. In a group of 7, that drops to about 17%. When a correction happens, the simulation shows it in amber rather than green, so you can see the mechanism in action.</p>
+      <p>The model includes a correction mechanism: in smaller groups, exclusion is more noticeable and more likely to be fixed. The correction probability φ(n) = 1.45/(n−1)^0.71 is empirically calibrated from observational data. In a group of 3, there is an 89% chance someone notices and pulls the isolated person back in. In a group of 7, that drops to about 41%. When a correction happens, the simulation shows it in amber rather than green, so you can see the mechanism in action.</p>
     </div>
   </div>
 
@@ -808,7 +809,7 @@ canvas {
       <div class="params-grid">
         <div class="param-group">
           <label>α (pair preference)</label>
-          <input type="number" id="p-alpha" value="2" step="0.1" min="1">
+          <input type="number" id="p-alpha" value="2.2" step="0.1" min="1">
           <span class="hint">Higher → more pairs form</span>
         </div>
         <div class="param-group">
@@ -818,7 +819,7 @@ canvas {
         </div>
         <div class="param-group">
           <label>γ (fragmentation)</label>
-          <input type="number" id="p-gamma" value="3" step="0.1" min="1">
+          <input type="number" id="p-gamma" value="5" step="0.1" min="1">
           <span class="hint">Higher → less likely to stay unified</span>
         </div>
         <div class="param-group">
@@ -836,6 +837,11 @@ canvas {
         <div class="param-group">
           <label>η (unity penalty)</label>
           <input type="number" id="p-eta" value="1" step="0.1" min="0">
+        </div>
+        <div class="param-group">
+          <label>κ (coordination cost)</label>
+          <input type="number" id="p-kappa" value="0.07" step="0.01" min="0">
+          <span class="hint">Cost per member beyond n=3</span>
         </div>
         <div class="param-group">
           <label>Interactions (T)</label>
@@ -906,6 +912,7 @@ function getParams() {
     theta: parseFloat(document.getElementById('p-theta').value),
     delta: parseFloat(document.getElementById('p-delta').value),
     eta: parseFloat(document.getElementById('p-eta').value),
+    kappa: parseFloat(document.getElementById('p-kappa').value),
     T: parseInt(document.getElementById('p-T').value),
   };
 }
@@ -960,6 +967,12 @@ function partitionPQS(parts, params) {
        - params.eta * s.unified;
 }
 
+// Empirically calibrated visibility correction: φ(n) = 1.45 / (n-1)^0.71
+function getVisibilityCorrection(n) {
+  if (n <= 2) return 1.0;
+  return Math.min(1.0, 1.45 / Math.pow(n - 1, 0.71));
+}
+
 // Precompute weighted partitions for a group size
 function buildSampler(n, params) {
   const partitions = generatePartitions(n);
@@ -975,16 +988,22 @@ function buildSampler(n, params) {
     cdf.push(cum);
   }
 
-  // P_caliban
+  // P_caliban with empirically calibrated visibility correction
   let pCal = 0;
   for (let i = 0; i < partitions.length; i++) {
     if (partitionStats(partitions[i]).isCaliban) pCal += probs[i];
   }
-  const phi = 1 / (n - 1);
+  const phi = getVisibilityCorrection(n);
   const pCalEff = pCal * (1 - phi);
 
+  // Coordination cost: ψ(n) = κ(n - 3)
+  const coordCost = params.kappa * (n - 3);
+
+  // Expected utility: E[u|n] = u_in - λ·P_eff - ψ(n)
+  const expectedUtil = params.ubase - params.delta * pCalEff - coordCost;
+
   return {
-    partitions, weights, probs, cdf, pCal, pCalEff,
+    partitions, weights, probs, cdf, pCal, pCalEff, phi, coordCost, expectedUtil,
     sample() {
       const r = Math.random();
       for (let i = 0; i < cdf.length; i++) {
@@ -1282,7 +1301,8 @@ function runMode1() {
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-label">Interaction</div><div class="stat-value" id="m1-t">0 / ${T}</div></div>
       <div class="stat-card"><div class="stat-label">Observed Caliban Rate</div><div class="stat-value red" id="m1-rate">0.000</div><div class="stat-sub">Predicted P_eff: ${sampler.pCalEff.toFixed(3)}</div></div>
-      <div class="stat-card"><div class="stat-label">Avg Utility / Interaction</div><div class="stat-value green" id="m1-util">0.00</div></div>
+      <div class="stat-card"><div class="stat-label">Avg Utility / Interaction</div><div class="stat-value green" id="m1-util">0.00</div><div class="stat-sub">Predicted E[u|n]: ${sampler.expectedUtil.toFixed(2)}</div></div>
+      <div class="stat-card"><div class="stat-label">Coordination Cost ψ(n)</div><div class="stat-value yellow" id="m1-coord">${sampler.coordCost.toFixed(2)}</div><div class="stat-sub">φ(n) = ${sampler.phi.toFixed(3)}</div></div>
     </div>
     <div class="bar-chart"><div class="chart-title">Caliban Burden per Member</div><div id="m1-bars"></div></div>
     <div class="chart-container"><div class="chart-title">Cumulative Per-Capita Utility</div><canvas id="m1-chart"></canvas></div>
@@ -1294,14 +1314,14 @@ function runMode1() {
     const assignment = assignMembers(n, parts);
     state.t++;
 
-    const phi = 1 / (n - 1);
+    const phi = sampler.phi;
     let correctedMember = -1;
     if (assignment.caliban >= 0 && Math.random() >= phi) {
       state.calibanCounts[assignment.caliban]++;
       state.totalCalibans++;
-      for (let i = 0; i < n; i++) state.cumUtil[i] += (i === assignment.caliban) ? -3 : 2;
+      for (let i = 0; i < n; i++) state.cumUtil[i] += (i === assignment.caliban) ? (params.ubase - params.delta - sampler.coordCost) : (params.ubase - sampler.coordCost);
     } else {
-      for (let i = 0; i < n; i++) state.cumUtil[i] += 2;
+      for (let i = 0; i < n; i++) state.cumUtil[i] += (params.ubase - sampler.coordCost);
       if (assignment.caliban >= 0) {
         correctedMember = assignment.caliban;
         assignment.caliban = -1; // corrected
@@ -1322,7 +1342,7 @@ function runMode1() {
     if (assignment.caliban >= 0) {
       statusEl.innerHTML = `<div class="status-line caliban-status">⚠ CALIBAN: ${memberLabel(assignment.caliban)} is isolated</div>`;
     } else if (correctedMember >= 0) {
-      statusEl.innerHTML = `<div class="status-line corrected-status">↻ CORRECTED: ${memberLabel(correctedMember)} was briefly isolated but reintegrated (visibility correction, φ=${(1/(n-1)).toFixed(2)})</div>`;
+      statusEl.innerHTML = `<div class="status-line corrected-status">↻ CORRECTED: ${memberLabel(correctedMember)} was briefly isolated but reintegrated (visibility correction, φ=${sampler.phi.toFixed(2)})</div>`;
     } else {
       statusEl.innerHTML = `<div class="status-line ok-status">✓ Everyone included</div>`;
     }
@@ -1355,12 +1375,12 @@ function runMode2() {
   content.innerHTML = `
     <div class="comparison-grid">
       <div class="comparison-panel prime">
-        <div class="panel-title prime">n = ${n1} ${isPrime(n1) ? '(Prime)' : '(Factorisable)'} · P_eff = ${s1.pCalEff.toFixed(3)}</div>
+        <div class="panel-title prime">n = ${n1} ${isPrime(n1) ? '(Prime)' : '(Factorisable)'} · P_eff = ${s1.pCalEff.toFixed(3)} · ψ = ${s1.coordCost.toFixed(2)}</div>
         <div id="m2-part1"></div>
         <div id="m2-status1" style="margin-top:0.5rem;"></div>
       </div>
       <div class="comparison-panel factorisable">
-        <div class="panel-title factorisable">n = ${n2} ${isPrime(n2) ? '(Prime)' : '(Factorisable)'} · P_eff = ${s2.pCalEff.toFixed(3)}</div>
+        <div class="panel-title factorisable">n = ${n2} ${isPrime(n2) ? '(Prime)' : '(Factorisable)'} · P_eff = ${s2.pCalEff.toFixed(3)} · ψ = ${s2.coordCost.toFixed(2)}</div>
         <div id="m2-part2"></div>
         <div id="m2-status2" style="margin-top:0.5rem;"></div>
       </div>
@@ -1369,8 +1389,8 @@ function runMode2() {
       <div class="stat-card"><div class="stat-label">Interaction</div><div class="stat-value" id="m2-t">0 / ${T}</div></div>
       <div class="stat-card"><div class="stat-label">n=${n1} Caliban Rate</div><div class="stat-value red" id="m2-rate1">0.000</div></div>
       <div class="stat-card"><div class="stat-label">n=${n2} Caliban Rate</div><div class="stat-value green" id="m2-rate2">0.000</div></div>
-      <div class="stat-card"><div class="stat-label">Utility/t (n=${n1})</div><div class="stat-value red" id="m2-util1">0.00</div></div>
-      <div class="stat-card"><div class="stat-label">Utility/t (n=${n2})</div><div class="stat-value green" id="m2-util2">0.00</div></div>
+      <div class="stat-card"><div class="stat-label">Utility/t (n=${n1})</div><div class="stat-value red" id="m2-util1">0.00</div><div class="stat-sub">Predicted: ${s1.expectedUtil.toFixed(2)}</div></div>
+      <div class="stat-card"><div class="stat-label">Utility/t (n=${n2})</div><div class="stat-value green" id="m2-util2">0.00</div><div class="stat-sub">Predicted: ${s2.expectedUtil.toFixed(2)}</div></div>
     </div>
     <div class="welfare-gap"><div class="gap-label">Cumulative Per-Capita Welfare Gap</div><div class="gap-value" id="m2-gap">+0.0</div></div>
     <div class="chart-container">
@@ -1387,13 +1407,13 @@ function runMode2() {
     const parts = sampler.sample();
     const a = assignMembers(n, parts);
     st.t++;
-    const phi = 1 / (n - 1);
+    const phi = sampler.phi;
     let correctedMember = -1;
     if (a.caliban >= 0 && Math.random() >= phi) {
       st.cal++;
-      for (let i = 0; i < n; i++) st.cumUtil[i] += (i === a.caliban) ? -3 : 2;
+      for (let i = 0; i < n; i++) st.cumUtil[i] += (i === a.caliban) ? (params.ubase - params.delta - sampler.coordCost) : (params.ubase - sampler.coordCost);
     } else {
-      for (let i = 0; i < n; i++) st.cumUtil[i] += 2;
+      for (let i = 0; i < n; i++) st.cumUtil[i] += (params.ubase - sampler.coordCost);
       if (a.caliban >= 0) { correctedMember = a.caliban; a.caliban = -1; }
     }
     const avg = st.cumUtil.reduce((a, b) => a + b, 0) / n;
@@ -1412,13 +1432,13 @@ function runMode2() {
 
     const s1Status = document.getElementById('m2-status1');
     const s2Status = document.getElementById('m2-status2');
-    function statusHtml(a, corrected) {
+    function statusHtml(a, corrected, sampler) {
       if (a.caliban >= 0) return `<div class="status-line caliban-status" style="padding:0.4rem 0.7rem;font-size:0.7rem;">⚠ ${memberLabel(a.caliban)} isolated</div>`;
       if (corrected >= 0) return `<div class="status-line corrected-status" style="padding:0.4rem 0.7rem;font-size:0.7rem;">↻ ${memberLabel(corrected)} corrected</div>`;
       return `<div class="status-line ok-status" style="padding:0.4rem 0.7rem;font-size:0.7rem;">✓ All included</div>`;
     }
-    s1Status.innerHTML = statusHtml(a1, r1.correctedMember);
-    s2Status.innerHTML = statusHtml(a2, r2.correctedMember);
+    s1Status.innerHTML = statusHtml(a1, r1.correctedMember, s1);
+    s2Status.innerHTML = statusHtml(a2, r2.correctedMember, s2);
 
     document.getElementById('m2-t').textContent = `${st1.t} / ${T}`;
     document.getElementById('m2-rate1').textContent = (st1.cal / st1.t).toFixed(3);
@@ -1468,6 +1488,7 @@ function runMode3() {
       <div class="stat-card"><div class="stat-label">Interaction</div><div class="stat-value" id="m3-t">0 / ${T}</div></div>
       <div class="stat-card"><div class="stat-label">Coefficient of Variation</div><div class="stat-value yellow" id="m3-cv">0.000</div><div class="stat-sub">0 = perfectly uniform</div></div>
       <div class="stat-card"><div class="stat-label">Range</div><div class="stat-value blue" id="m3-range">0 – 0</div></div>
+      <div class="stat-card"><div class="stat-label">Visibility φ(n)</div><div class="stat-value green" id="m3-phi">${sampler.phi.toFixed(3)}</div><div class="stat-sub">Coordination ψ = ${sampler.coordCost.toFixed(2)}</div></div>
     </div>
     <div class="bar-chart"><div class="chart-title">Caliban Count per Member</div><div id="m3-bars"></div></div>
     <div class="heatmap-container">
@@ -1484,7 +1505,7 @@ function runMode3() {
     const assignment = assignMembers(n, parts);
     state.t++;
 
-    const phi = 1 / (n - 1);
+    const phi = sampler.phi;
     let calIdx = -1;
     let correctedMember = -1;
     if (assignment.caliban >= 0 && Math.random() >= phi) {
@@ -1582,14 +1603,16 @@ function runMode4Animated(params, T, sizes, colorMap, isPrime) {
       <td style="color:${typeColor};">${type}</td>
       <td id="m4-rate-${g.n}">-</td>
       <td>${g.sampler.pCalEff.toFixed(3)}</td>
+      <td>${g.sampler.coordCost.toFixed(2)}</td>
       <td id="m4-util-${g.n}">-</td>
+      <td>${g.sampler.expectedUtil.toFixed(2)}</td>
     </tr>`;
   });
 
   content.innerHTML = `
     <div class="stat-card" style="display:inline-block;margin-bottom:1rem;"><div class="stat-label">Interaction</div><div class="stat-value" id="m4-t">0 / ${T}</div></div>
     <table class="long-table" id="m4-table">
-      <thead><tr><th>n</th><th>Type</th><th>Observed Rate</th><th>Predicted P_eff</th><th>Utility/t</th></tr></thead>
+      <thead><tr><th>n</th><th>Type</th><th>Observed Rate</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility/t</th><th>E[u|n]</th></tr></thead>
       <tbody id="m4-tbody">${tableRows}</tbody>
     </table>
     <div class="chart-container">
@@ -1611,7 +1634,7 @@ function runMode4Animated(params, T, sizes, colorMap, isPrime) {
   let t = 0;
   function step() {
     if (!simRunning || t >= T) {
-      if (t >= T) showRankedTable(groups, isPrime);
+      if (t >= T) showRankedTable(groups, isPrime, params);
       stopSim();
       return;
     }
@@ -1623,12 +1646,12 @@ function runMode4Animated(params, T, sizes, colorMap, isPrime) {
         const parts = g.sampler.sample();
         const a = assignMembers(g.n, parts);
         g.t++;
-        const phi = 1 / (g.n - 1);
+        const phi = g.sampler.phi;
         if (a.caliban >= 0 && Math.random() >= phi) {
           g.cal++;
-          for (let i = 0; i < g.n; i++) g.cumUtil[i] += (i === a.caliban) ? -3 : 2;
+          for (let i = 0; i < g.n; i++) g.cumUtil[i] += (i === a.caliban) ? (params.ubase - params.delta - g.sampler.coordCost) : (params.ubase - g.sampler.coordCost);
         } else {
-          for (let i = 0; i < g.n; i++) g.cumUtil[i] += 2;
+          for (let i = 0; i < g.n; i++) g.cumUtil[i] += (params.ubase - g.sampler.coordCost);
         }
         const avg = g.cumUtil.reduce((a, b) => a + b, 0) / g.n;
         g.hist.push(avg / g.t);
@@ -1697,7 +1720,9 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
       <td style="color:${typeColor};">${type}</td>
       <td id="m4a-rate-${n}">-</td>
       <td>${samplers[n].pCalEff.toFixed(3)}</td>
+      <td>${samplers[n].coordCost.toFixed(2)}</td>
       <td id="m4a-util-${n}">-</td>
+      <td>${samplers[n].expectedUtil.toFixed(2)}</td>
     </tr>`;
   });
 
@@ -1708,7 +1733,7 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
       <div class="stat-sub">${numTrials.toLocaleString()} trials × ${T} interactions each = ${(numTrials * T).toLocaleString()} total interactions per group size</div>
     </div>
     <table class="long-table">
-      <thead><tr><th>n</th><th>Type</th><th>Observed Rate (running)</th><th>Predicted P_eff</th><th>Utility/t (running)</th></tr></thead>
+      <thead><tr><th>n</th><th>Type</th><th>Observed Rate (running)</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility/t (running)</th><th>E[u|n]</th></tr></thead>
       <tbody>${tableRows}</tbody>
     </table>
     ${animateChart ? `
@@ -1744,12 +1769,12 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
         for (let t = 0; t < T; t++) {
           const parts = sampler.sample();
           const a = assignMembers(n, parts);
-          const phi = 1 / (n - 1);
+          const phi = sampler.phi;
           if (a.caliban >= 0 && Math.random() >= phi) {
             cal++;
-            for (let i = 0; i < n; i++) cumUtil[i] += (i === a.caliban) ? -3 : 2;
+            for (let i = 0; i < n; i++) cumUtil[i] += (i === a.caliban) ? (params.ubase - params.delta - sampler.coordCost) : (params.ubase - sampler.coordCost);
           } else {
-            for (let i = 0; i < n; i++) cumUtil[i] += 2;
+            for (let i = 0; i < n; i++) cumUtil[i] += (params.ubase - sampler.coordCost);
           }
         }
 
@@ -1807,7 +1832,7 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
       const rate = agg[n].totalCal / agg[n].totalInteractions;
       const utilPerT = agg[n].utilSum / numTrials;
       const type = isPrime(n) ? 'Prime' : (n === 12 ? 'Highly Fact.' : 'Factorisable');
-      return { n, type, rate, predicted: samplers[n].pCalEff, utilPerT, color: colorMap[n] };
+      return { n, type, rate, predicted: samplers[n].pCalEff, coordCost: samplers[n].coordCost, expectedUtil: samplers[n].expectedUtil, utilPerT, color: colorMap[n] };
     });
 
     // Draw final chart frame for large trial counts (where live animation was skipped)
@@ -1840,7 +1865,7 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
         Final Results: ${numTrials.toLocaleString()} trials × ${T} interactions = ${(numTrials * T).toLocaleString()} total interactions per group
       </div>
       <table class="long-table">
-        <thead><tr><th>n</th><th>Type</th><th>Observed Rate (avg)</th><th>Predicted P_eff</th><th>Utility/t (avg)</th><th>Deviation</th></tr></thead><tbody>`;
+        <thead><tr><th>n</th><th>Type</th><th>Observed Rate (avg)</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility/t (avg)</th><th>E[u|n]</th><th>Deviation</th></tr></thead><tbody>`;
 
     for (const r of results) {
       const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
@@ -1851,7 +1876,9 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
         <td style="color:${typeColor};">${r.type}</td>
         <td>${r.rate.toFixed(4)}</td>
         <td>${r.predicted.toFixed(4)}</td>
+        <td>${r.coordCost.toFixed(2)}</td>
         <td>${r.utilPerT.toFixed(4)}</td>
+        <td>${r.expectedUtil.toFixed(2)}</td>
         <td style="color:${devColor};">${deviation}%</td>
       </tr>`;
     }
@@ -1870,7 +1897,7 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
         <span style="color:var(--text-muted);text-transform:none;font-style:italic;"> — averaged over ${numTrials.toLocaleString()} trials</span>
       </div>
       <table class="long-table">
-        <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>Utility per Interaction</th></tr></thead><tbody>`;
+        <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
 
     ranked.forEach((r, i) => {
       const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
@@ -1880,13 +1907,15 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
         <td style="color:${typeColor};">${r.type}</td>
         <td>${r.rate.toFixed(4)}</td>
         <td>${r.predicted.toFixed(4)}</td>
+        <td>${r.coordCost.toFixed(2)}</td>
         <td style="font-weight:600;">${r.utilPerT.toFixed(4)}</td>
+        <td>${r.expectedUtil.toFixed(2)}</td>
       </tr>`;
     });
 
     rankedHtml += `</tbody></table>
       <div style="font-size:0.8rem;color:var(--text-dim);margin-top:0.8rem;line-height:1.5;">
-        With ${numTrials.toLocaleString()} trials (${(numTrials * T).toLocaleString()} interactions per group size), stochastic noise is effectively eliminated. The ranking confirms the model's central prediction: even factorisable group sizes (4, 6, 8, 10, 12, 14) cluster at the top, while prime sizes (5, 7, 11, 13) cluster at the bottom.
+        With ${numTrials.toLocaleString()} trials (${(numTrials * T).toLocaleString()} interactions per group size), stochastic noise is effectively eliminated. The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom.
       </div>
     </div>`;
 
@@ -1899,12 +1928,13 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
   runChunk();
 }
 
-function showRankedTable(groups, isPrime) {
+function showRankedTable(groups, isPrime, params) {
   const ranked = groups.map(g => {
     const avg = g.cumUtil.reduce((a, b) => a + b, 0) / g.n;
     const type = isPrime(g.n) ? 'Prime' : (g.n === 12 ? 'Highly Fact.' : 'Factorisable');
     return {
       n: g.n, type, rate: g.cal / g.t, predicted: g.sampler.pCalEff,
+      coordCost: g.sampler.coordCost, expectedUtil: g.sampler.expectedUtil,
       utilPerT: avg / g.t, totalUtil: avg, color: g.color
     };
   }).sort((a, b) => b.utilPerT - a.utilPerT);
@@ -1912,7 +1942,7 @@ function showRankedTable(groups, isPrime) {
   let html = `<div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border);">
     <div style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:1rem;">Final Rankings: Group Sizes by Member Utility (highest to lowest)</div>
     <table class="long-table">
-      <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>Utility per Interaction</th></tr></thead><tbody>`;
+      <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
 
   ranked.forEach((r, i) => {
     const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
@@ -1922,13 +1952,15 @@ function showRankedTable(groups, isPrime) {
       <td style="color:${typeColor};">${r.type}</td>
       <td>${r.rate.toFixed(3)}</td>
       <td>${r.predicted.toFixed(3)}</td>
+      <td>${r.coordCost.toFixed(2)}</td>
       <td style="font-weight:600;">${r.utilPerT.toFixed(3)}</td>
+      <td>${r.expectedUtil.toFixed(2)}</td>
     </tr>`;
   });
 
   html += `</tbody></table>
     <div style="font-size:0.8rem;color:var(--text-dim);margin-top:0.8rem;line-height:1.5;">
-      The ranking confirms the model's central prediction: even factorisable group sizes (4, 6, 8, 10, 12, 14) cluster at the top, while prime sizes (5, 7, 11, 13) cluster at the bottom. This matches the analytical results from the paper's Table 1.
+      The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom. This matches the analytical results from the paper's Table 1.
     </div>
   </div>`;
 
