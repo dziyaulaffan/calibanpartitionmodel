@@ -790,7 +790,7 @@ canvas {
       <p><span class="param-explain">α (pair preference)</span> controls how strongly conversations gravitate toward pairs. Higher values mean the partition {2,2,2} for n=6 becomes much more likely than {3,3}. Default: 2.2 (calibrated from observed pair/triad ratio of 274/126).</p>
       <p><span class="param-explain">β (balance preference)</span> controls how much the model favours equal-sized subgroups. Higher values penalise unbalanced splits like {5,1} relative to {3,3}.</p>
       <p><span class="param-explain">γ (fragmentation)</span> controls how unlikely it is that the whole group stays as one conversation. Higher values make fragmentation into subgroups almost certain for larger groups. Default: 5 (calibrated from ~8% unified partition rate).</p>
-      <p><span class="param-explain">δ (Caliban penalty)</span> is the utility cost of being isolated. The default of 5 means being a Caliban is far worse than the baseline benefit of being included (u_base = 2).</p>
+      <p><span class="param-explain">δ (Caliban penalty)</span> is the utility cost of being isolated. The default of 15 means being a Caliban is far worse than the baseline benefit of being included (u_base = 2).</p>
       <p><span class="param-explain">κ (coordination cost)</span> is the per-member cost of belonging to a larger group. Each member beyond n=3 adds κ to the coordination burden. Default: 0.07 (calibrated from the observation that no groups exceeded n=7, implying coordination costs make large groups suboptimal despite their lower Caliban probabilities).</p>
       <p><span class="param-explain">T (interactions)</span> is the number of social gatherings to simulate. More interactions give the observed rates more time to converge to the predicted values.</p>
 
@@ -832,7 +832,7 @@ canvas {
         </div>
         <div class="param-group">
           <label>δ (Caliban penalty)</label>
-          <input type="number" id="p-delta" value="5" step="0.5" min="0">
+          <input type="number" id="p-delta" value="15" step="0.5" min="0">
         </div>
         <div class="param-group">
           <label>η (unity penalty)</label>
@@ -847,6 +847,9 @@ canvas {
           <label>Interactions (T)</label>
           <input type="number" id="p-T" value="500" step="50" min="10" max="5000">
         </div>
+      </div>
+      <div style="margin-top:1rem;text-align:right;">
+        <button class="btn" onclick="resetParams()">↺ Reset to Defaults</button>
       </div>
     </div>
   </div>
@@ -915,6 +918,18 @@ function getParams() {
     kappa: parseFloat(document.getElementById('p-kappa').value),
     T: parseInt(document.getElementById('p-T').value),
   };
+}
+
+function resetParams() {
+  document.getElementById('p-alpha').value = '2.2';
+  document.getElementById('p-beta').value = '1.5';
+  document.getElementById('p-gamma').value = '5';
+  document.getElementById('p-ubase').value = '2';
+  document.getElementById('p-theta').value = '1';
+  document.getElementById('p-delta').value = '15';
+  document.getElementById('p-eta').value = '1';
+  document.getElementById('p-kappa').value = '0.07';
+  document.getElementById('p-T').value = '500';
 }
 
 function getSpeed() {
@@ -1860,53 +1875,27 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
       drawLineChart('m4a-chart', syntheticDatasets, numTrials);
     }
 
-    let tableHtml = `
-      <div style="font-family:'JetBrains Mono',monospace;font-size:0.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:1rem;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);">
-        Final Results: ${numTrials.toLocaleString()} trials × ${T} interactions = ${(numTrials * T).toLocaleString()} total interactions per group
-      </div>
-      <table class="long-table">
-        <thead><tr><th>n</th><th>Type</th><th>Observed Rate (avg)</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility/t (avg)</th><th>E[u|n]</th><th>Deviation</th></tr></thead><tbody>`;
-
-    for (const r of results) {
-      const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
-      const deviation = ((r.rate - r.predicted) / r.predicted * 100).toFixed(2);
-      const devColor = Math.abs(parseFloat(deviation)) < 1 ? 'var(--included-green)' : 'var(--yellow)';
-      tableHtml += `<tr>
-        <td style="color:${r.color};font-weight:600;">${r.n}</td>
-        <td style="color:${typeColor};">${r.type}</td>
-        <td>${r.rate.toFixed(4)}</td>
-        <td>${r.predicted.toFixed(4)}</td>
-        <td>${r.coordCost.toFixed(2)}</td>
-        <td>${r.utilPerT.toFixed(4)}</td>
-        <td>${r.expectedUtil.toFixed(2)}</td>
-        <td style="color:${devColor};">${deviation}%</td>
-      </tr>`;
-    }
-    tableHtml += `</tbody></table>
-      <div style="font-size:0.75rem;color:var(--text-dim);margin-top:0.6rem;">
-        "Deviation" shows the percentage difference between observed and predicted Caliban rates. With ${numTrials.toLocaleString()} trials, deviations should be very small (well under 1%), confirming convergence to analytical predictions.
-      </div>`;
-
-    document.getElementById('m4a-results').innerHTML = tableHtml;
-
     const ranked = [...results].sort((a, b) => b.utilPerT - a.utilPerT);
 
     let rankedHtml = `<div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border);">
       <div style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:1rem;">
         Final Rankings: Group Sizes by Member Utility (highest to lowest)
-        <span style="color:var(--text-muted);text-transform:none;font-style:italic;"> — averaged over ${numTrials.toLocaleString()} trials</span>
+        <span style="color:var(--text-muted);text-transform:none;font-style:italic;"> — ${numTrials.toLocaleString()} trials × ${T} interactions = ${(numTrials * T).toLocaleString()} total interactions per group</span>
       </div>
       <table class="long-table">
-        <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
+        <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>Deviation</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
 
     ranked.forEach((r, i) => {
       const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
+      const deviation = ((r.rate - r.predicted) / r.predicted * 100).toFixed(2);
+      const devColor = Math.abs(parseFloat(deviation)) < 1 ? 'var(--included-green)' : 'var(--yellow)';
       rankedHtml += `<tr>
         <td style="font-weight:600;">${i + 1}</td>
         <td style="color:${r.color};font-weight:600;">${r.n}</td>
         <td style="color:${typeColor};">${r.type}</td>
         <td>${r.rate.toFixed(4)}</td>
         <td>${r.predicted.toFixed(4)}</td>
+        <td style="color:${devColor};">${deviation}%</td>
         <td>${r.coordCost.toFixed(2)}</td>
         <td style="font-weight:600;">${r.utilPerT.toFixed(4)}</td>
         <td>${r.expectedUtil.toFixed(2)}</td>
@@ -1915,7 +1904,7 @@ function runMode4Aggregated(params, T, numTrials, sizes, colorMap, isPrime) {
 
     rankedHtml += `</tbody></table>
       <div style="font-size:0.8rem;color:var(--text-dim);margin-top:0.8rem;line-height:1.5;">
-        With ${numTrials.toLocaleString()} trials (${(numTrials * T).toLocaleString()} interactions per group size), stochastic noise is effectively eliminated. The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom.
+        With ${numTrials.toLocaleString()} trials, stochastic noise is effectively eliminated. "Deviation" shows the percentage difference between observed and predicted Caliban rates. The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom.
       </div>
     </div>`;
 
@@ -1942,16 +1931,19 @@ function showRankedTable(groups, isPrime, params) {
   let html = `<div style="margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid var(--border);">
     <div style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;color:var(--accent);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:1rem;">Final Rankings: Group Sizes by Member Utility (highest to lowest)</div>
     <table class="long-table">
-      <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
+      <thead><tr><th>Rank</th><th>n</th><th>Type</th><th>Observed Caliban Rate</th><th>Predicted P_eff</th><th>Deviation</th><th>ψ(n)</th><th>Utility per Interaction</th><th>E[u|n]</th></tr></thead><tbody>`;
 
   ranked.forEach((r, i) => {
     const typeColor = r.type === 'Prime' ? 'var(--caliban-red)' : 'var(--included-green)';
+    const deviation = ((r.rate - r.predicted) / r.predicted * 100).toFixed(2);
+    const devColor = Math.abs(parseFloat(deviation)) < 5 ? 'var(--included-green)' : 'var(--yellow)';
     html += `<tr>
       <td style="font-weight:600;">${i + 1}</td>
       <td style="color:${r.color};font-weight:600;">${r.n}</td>
       <td style="color:${typeColor};">${r.type}</td>
       <td>${r.rate.toFixed(3)}</td>
       <td>${r.predicted.toFixed(3)}</td>
+      <td style="color:${devColor};">${deviation}%</td>
       <td>${r.coordCost.toFixed(2)}</td>
       <td style="font-weight:600;">${r.utilPerT.toFixed(3)}</td>
       <td>${r.expectedUtil.toFixed(2)}</td>
@@ -1960,7 +1952,7 @@ function showRankedTable(groups, isPrime, params) {
 
   html += `</tbody></table>
     <div style="font-size:0.8rem;color:var(--text-dim);margin-top:0.8rem;line-height:1.5;">
-      The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom. This matches the analytical results from the paper's Table 1.
+      The ranking confirms the model's central prediction: small even factorisable group sizes (4, 6) cluster at the top due to low Caliban probability and low coordination costs, while larger primes (7, 11, 13) cluster at the bottom. "Deviation" shows the percentage difference between observed and predicted Caliban rates.
     </div>
   </div>`;
 
